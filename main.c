@@ -11,18 +11,32 @@ struct MenuList {
     char **entries;
 };
 
+void main_menu(void); // So im guessing this is like an abstract method in Java (C prototype)
+void logout_page(void);
+
 static void print_list(const struct MenuList *menu) {
     for (size_t i = 0; i < menu->size; i++) {
         printf("%zu. %s\n", i + 1, menu->entries[i]);
     }
 }
 
+// Redundant for now as strcasecmp exists
+// static void string_to_lower_safe(const char *src, char *dst, size_t dst_size) {
+//     if (!src) return;
+//     size_t i = 0;
+//     while (src[i] && i < dst_size - 1) {
+//         dst[i] = (char) tolower(src[i]);
+//         i++;
+//     }
+//     dst[i] = '\0';
+// }
+
 static char *main_menu_entries_logged_out[] = {
     "Create a New Bank Account", "Login to an Existing Bank Account"
 };
 
 static char *main_menu_entries_logged_in[] = {
-    "Create a New Bank Account", "Delete a Bank Account", "Deposit", "Withdrawal", "Remittance"
+    "Deposit", "Withdrawal", "Remittance", "Logout", "Delete"
 };
 
 #define MAIN_MENU_LOGGED_IN_COUNT (sizeof(main_menu_entries_logged_in) / sizeof(main_menu_entries_logged_in[0]))
@@ -51,7 +65,66 @@ struct BankAccount {
     char pin[5];
     time_t date_created;
     double balance;
+
+    int (*deposit)(void *self, float amount);
+
+    int (*withdrawal)(void *self, float amount);
+
+    int (*remittance)(void *self, char recipient[], float amount);
+
+    void (*delete)(void *self);
 };
+
+int deposit(void *self_ptr, float amount) {
+    struct BankAccount *acc = self_ptr;
+    acc->balance += amount;
+    return 1;
+}
+
+int withdrawal(void *self_ptr, float amount) {
+    struct BankAccount *acc = self_ptr;
+    if ((acc->balance - amount) > 0) {
+        acc->balance -= amount;
+        return 1;
+    }
+    return 0;
+}
+
+struct BankAccount *get_account_from_id(char *id);
+
+struct BankAccount *get_account_from_name(char *name);
+
+int is_valid_id(char *id);
+
+int remittance(void *self_ptr, char recipient[], float amount) {
+    struct BankAccount *acc = self_ptr;
+    struct BankAccount *receiver;
+
+    if (is_valid_id(recipient)) {
+        // printf("get_account_from_id\n");
+        receiver = get_account_from_id(recipient);
+    } else {
+        // printf("get_account_from_name\n");
+        receiver = get_account_from_name(recipient);
+        // printf("%s\n", acc->name);
+    }
+
+    if ((acc->balance - amount) > 0) {
+        if (receiver != NULL) {
+            acc->balance -= amount;
+            receiver->balance += amount;
+            printf("Successfully transferred %f to %s", amount, receiver->name);
+            free(receiver);
+            return 1;
+        }
+        printf("Cannot find recipient account\n");
+        return 0;
+    }
+    printf("Not enough money brokie\n");
+    free(receiver);
+    return 0;
+}
+
 
 static void print_account_simple(const struct BankAccount *acc) {
     printf("Name: %s\n", acc->name);
@@ -66,7 +139,7 @@ static void print_account(const struct BankAccount *acc) {
 }
 
 
-static void *current_account = NULL;
+static struct BankAccount *current_account = NULL;
 
 int duplicate_id(long long id) {
     return 0; // For now, haven't set up database
@@ -233,6 +306,21 @@ void delete_page() {
 }
 
 void deposit_page() {
+    printf("Enter the amount you would like to Deposit: ");
+    fflush(stdout);
+
+    float amount;
+    if (scanf("%f", &amount) != 1 || amount <= 0) {
+        while (getchar() != '\n') {}
+        // clear buffer
+        printf("Invalid amount. Enter a positive number: ");
+        deposit_page();
+        return;
+    }
+    current_account->deposit(current_account, amount);
+    printf("Deposited %.2f successfully!\n", amount);
+
+    main_menu();
 }
 
 void withdrawal_page() {
@@ -240,6 +328,7 @@ void withdrawal_page() {
 
 void remittance_page() {
 }
+
 
 void print_session_info() {
 }
@@ -280,7 +369,7 @@ int is_txt_file(const char *filename) {
     return 0;
 }
 
-int is_valid_id(const char *id) {
+int is_valid_id(char *id) {
     size_t len = strlen(id);
     if (len < 7 || len > 9) return 0;
 
@@ -290,13 +379,24 @@ int is_valid_id(const char *id) {
     return 1;
 }
 
+// I forgot to initialize function pointers... this wasted so much time
+// TODO: Call in create_page(), get_account_from_id() and get_account_from_name();
+void init_account_vtable(struct BankAccount *acc) {
+    acc->deposit = deposit;
+    acc->withdrawal = withdrawal;
+    acc->remittance = remittance;
+    acc->delete = NULL; // TODO : implement later
+}
 
-struct BankAccount *get_account_from_id(const char *id) {
+struct BankAccount *get_account_from_id(char *id) {
     if (!id || id[0] == '\0') return NULL;
 
     // Unfortunately C has no built-in JSON parser, would make it more robust
     struct BankAccount *acc = malloc(sizeof *acc);
+
     if (!acc) return NULL;
+
+    init_account_vtable(acc);
 
     char path[256];
     int len = snprintf(path, sizeof(path), "./database/%s.txt", id);
@@ -420,20 +520,27 @@ load_or_create_database(int debug) {
 }
 
 
-struct BankAccount *get_account_from_name(const char *name) {
+struct BankAccount *get_account_from_name(char *name) {
     DatabaseResult db_result = load_or_create_database(false);
     if (db_result.count == 0) {
         free(db_result.accounts);
         // printf("db_result.count == 0\n");
         return NULL;
     }
-
+    // char name_lower[64];
+    // string_to_lower_safe(name, name_lower, sizeof(name_lower));
     for (size_t i = 0; i < db_result.count; i++) {
-        if (strcmp(db_result.accounts[i].name, name) == 0) {
+        // char acc_name_lower[32];
+        // string_to_lower_safe(db_result.accounts[i].name, acc_name_lower, sizeof(acc_name_lower));
+
+        // WHY DIDNT I KNOW strcasecmp EXISTED???????
+        if (strcasecmp(db_result.accounts[i].name, name) == 0) {
             struct BankAccount *copy = malloc(sizeof(struct BankAccount));
             if (copy) {
                 *copy = db_result.accounts[i];
             }
+
+            init_account_vtable(copy);
 
 
             free(db_result.accounts);
@@ -459,15 +566,14 @@ int login(char *first, char *pin) {
         printf("Failed to Login: Account not found\n");
         return 0;
     }
-    if (acc->pin == pin) {
+    if (strcmp(acc->pin, pin) != 0) {
         printf("Failed to Login: Incorrect PIN\n");
         free(acc);
         return 1;
     }
     printf("Successfully logged in to %s\n", acc->name);
-    free(acc);
     current_account = acc;
-    return 0;
+    return 1;
 }
 
 void login_page() {
@@ -479,11 +585,16 @@ void login_page() {
 
     // printf("%s\n", first);
     login(first, pin);
+    main_menu();
+    free(first);
+    free(pin);
 }
 
 void print_login_details() {
     if (current_account == NULL) {
         printf("Not currently logged in\n");
+    } else {
+        print_account(current_account);
     }
 }
 
@@ -497,6 +608,9 @@ void print_logo() {
 }
 
 void main_menu() {
+    print_login_details();
+    fflush(stdin); // important...
+
     char input[50];
     int loggedIn = current_account != NULL;
 
@@ -526,24 +640,46 @@ void main_menu() {
         } else {
             switch (option) {
                 case 0:
-                    create_page();
-                    break;
-                case 1:
-                    delete_page();
-                    break;
-                case 2:
                     deposit_page();
                     break;
-                case 3:
+                case 1:
                     withdrawal_page();
                     break;
-                case 4:
+                case 2:
                     remittance_page();
+                    break;
+                case 3:
+                    logout_page();
+                    break;
+                case 4:
+                    delete_page();
                     break;
                 default: main_menu();
             }
         }
     }
+}
+
+void logout_page() {
+    char buffer[64];
+    printf("Are you sure you would like to Logout? (y/n)\n");
+    fgets(buffer, sizeof(buffer), stdin);
+
+    if (strcasecmp(buffer, "yes\n") == 0 || strcasecmp(buffer, "y\n") == 0 ||
+        strcmp(buffer, "yes") == 0 || strcmp(buffer, "y") == 0) {
+        current_account = NULL;
+        printf("Logged out successfully!\n");
+        main_menu();
+        return;
+    }
+    if (strcasecmp(buffer, "no\n") == 0 || strcasecmp(buffer, "n\n") == 0 ||
+        // WHY DIDNT I KNOW strcasecmp EXISTED???????
+        strcmp(buffer, "no") == 0 || strcmp(buffer, "n") == 0) {
+        main_menu();
+        return;
+    }
+    printf("Please enter a valid option\n");
+    logout_page();
 }
 
 int main() {
@@ -558,9 +694,6 @@ int main() {
         }
     }
     free(res.accounts);
-
-
-    print_login_details();
 
     printf("What would you like to do today?\n");
     main_menu();
