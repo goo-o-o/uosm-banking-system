@@ -5,58 +5,165 @@
 #include <string.h>
 #include <time.h>
 #include <dirent.h>
-// https://www.sololearn.com/en/compiler-playground/c5AkrEzE6i02/?ref=app
-void get_string(char *prompt, char **p_strp) {
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+static void enable_utf8() {
+#ifdef _WIN32
+    SetConsoleOutputCP(65001);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    _setmode(_fileno(stdout), CP_UTF8);
+#endif
+}
+
+/**
+ * @brief Convenience method
+ */
+void print_divider() {
+    for (int i = 0; i < 50; i++)
+        printf("━");
+    printf("\n");
+}
+
+/**
+ * @brief Checks if a file is a txt file
+ * @param file_name The name of the file
+ * @return 1 if the file is a txt file, else 0
+ */
+int is_txt_file(const char *file_name) {
+    const size_t len = strlen(file_name);
+    if (strcmp(file_name + len - 4, ".txt") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * @brief Gets the string input of any length
+ *
+ * @param prompt Optional prompt
+ * @param p_str Pointer to store the input to
+ *
+ * @note https://www.sololearn.com/en/compiler-playground/c5AkrEzE6i02/?ref=app
+ */
+void get_string(char *prompt, char **p_str) {
     printf("%s", prompt);
     for (int i = 0; 1; i++) {
         if (i) {
-            *p_strp = (char *) realloc(*p_strp, i * 2);
+            *p_str = (char *) realloc(*p_str, i * 2);
         } else {
-            *p_strp = (char *) malloc(i + 1);
+            *p_str = (char *) malloc(i + 1);
         }
 
-        (*p_strp)[i] = getchar();
-        if ((*p_strp)[i] == '\n' || (*p_strp)[i] == EOF) {
-            (*p_strp)[i] = '\0';
+        (*p_str)[i] = getchar();
+        if ((*p_str)[i] == '\n' || (*p_str)[i] == EOF) {
+            (*p_str)[i] = '\0';
             break;
         }
     }
 }
 
-// Source - https://stackoverflow.com/a
-// Posted by Stephan Lechner
-// Retrieved 2025-11-24, License - CC BY-SA 3.0
 
+/**
+ * @brief Robust method to determine whether a string is a float input
+ *
+ * @param input The string
+ *
+ * @note Posted by Stephan Lechner \n Retrieved 2025-11-24 \n License - CC BY-SA 3.0 \n
+ * @link { https://stackoverflow.com/a/45554836 }
+ *
+ */
 int is_string_float(const char *input) {
     char *foo;
-
     strtod(input, &foo);
-    // printf("1\n");
-    // double d = strtod(input, &foo);
     if (foo == input) {
-        // printf("2\n");
         return 0;
     }
     if (foo[strspn(foo, " \t\r\n")] != '\0') {
-        // printf("3\n");
         return 0;
     }
-    // printf("4\n");
     return 1;
 }
 
-
-struct BankAccount *get_account_from_id(char *id);
-
-struct MenuList {
-    size_t size;
-    char **entries;
-};
+const char *path_to_db = "./database";
+char const *account_types[] = {"Savings", "Current"};
 
 enum AccountType {
     SAVINGS, CURRENT, NUM_ACCOUNT_TYPES
 };
 
+struct BankAccount {
+    char name[100];
+    char id[100];
+    enum AccountType account_type;
+    char pin[5];
+    time_t date_created;
+    double balance;
+};
+
+void main_menu(void);
+
+void deposit_page(void);
+
+void withdrawal_page(void);
+
+void remittance_page(void);
+
+void logout_page(void);
+
+
+/**
+ * @brief Abstract method to get the account from id
+ * @note This method is Nullable
+ * @param id The queried ID in the form of a string
+ * @return @struct BankAccount { with corresponding id if present }
+ */
+struct BankAccount *get_account_from_id(char *id);
+
+/**
+ * @brief Abstract method to get the account from Name
+ * @note This method is Nullable
+ * @param name The queried name in the form of a string
+ * @return @struct BankAccount { with corresponding name if present }
+ */
+struct BankAccount *get_account_from_name(char *name);
+
+/**
+ * Convenience struct to print out Menu Lists easier
+ */
+struct MenuList {
+    size_t size;
+    const char *entries[];
+};
+
+
+static const struct MenuList main_menu_logged_in = {
+    .size = 5,
+    .entries = {
+        "Deposit",
+        "Withdrawal",
+        "Remittance",
+        "Logout",
+        "Delete"
+    }
+};
+
+static const struct MenuList main_menu_logged_out = {
+    .size = 2,
+    .entries = {
+        "Create a New Bank Account",
+        "Login to an Existing Bank Account"
+    }
+};
+
+
+/**
+ * @brief Validates an ID
+ * @param id The ID to be validated in the form of a string
+ * @return 1 if the ID is between 7-9 chars and every char is a digit, else 0
+ */
 int is_valid_id(const char *id) {
     const size_t len = strlen(id);
     if (len < 7 || len > 9) return 0;
@@ -67,39 +174,15 @@ int is_valid_id(const char *id) {
     return 1;
 }
 
-struct BankAccount *get_account_from_name(char *name);
-
-struct BankAccount {
-    char name[100];
-    char id[100];
-    enum AccountType account_type;
-    char pin[5];
-    time_t date_created;
-    double balance;
-
-    int (*float_deposit)(void *self, float amount);
-
-    int (*deposit)(void *self, const char *amount);
-
-    int (*float_withdrawal)(void *self, float amount, bool debug);
-
-    int (*withdrawal)(void *self, const char *amount, bool debug);
-
-    int (*float_remittance)(void *self, char *recipient, float amount);
-
-    int (*remittance)(void *self, char *recipient, const char *amount);
-
-    void (*delete)(void *self);
-
-    int (*equal)(void *self, struct BankAccount other);
-};
-
 static struct BankAccount *current_account = NULL;
 
-int equal(void *self_ptr, struct BankAccount *other) {
-    // I'll just do a janky way
-    struct BankAccount *acc = self_ptr;
-
+/**
+ * @brief Convenience method to check if two BankAccounts are equal
+ * @param acc The first account to compare with
+ * @param other The other BankAccount to check with
+ * @return Returns 1 if both BankAccount's are equal
+ */
+int equal(const struct BankAccount *acc, const struct BankAccount *other) {
     if (acc->balance != acc->balance) return 0;
     if (strcmp(acc->pin, other->pin) != 0) return 0;
     if (strcmp(acc->id, other->id) != 0) return 0;
@@ -109,83 +192,82 @@ int equal(void *self_ptr, struct BankAccount *other) {
     return 1;
 }
 
-int float_deposit(void *self_ptr, const float amount) {
-    struct BankAccount *acc = self_ptr;
+/**
+ * @brief Convenience method to deposit into a BankAccount
+ * @param acc The BankAccount to deposit into
+ * @param amount The amount to deposit
+ * @return 1 at all times
+ */
+static int float_deposit(struct BankAccount *acc, const float amount) {
     acc->balance += amount;
     return 1;
 }
 
-int deposit(void *self_ptr, const char *amount) {
+/**
+ * @brief Convenience method to deposit into a BankAccount with built-in input validation
+ * @param acc The BankAccount to deposit into
+ * @param amount The amount to deposit
+ * @return 1 if input is valid, else 0
+ */
+int deposit(struct BankAccount *acc, const char *amount) {
     if (is_string_float(amount)) {
-        char *end_ptr; // ignored for now
-        const float float_amount = strtof(amount, &end_ptr);
-        return float_deposit(self_ptr, float_amount);
+        char *ignored; // ignored for now
+        const float float_amount = strtof(amount, &ignored);
+        return float_deposit(acc, float_amount);
     }
-    printf("Please enter a positive float\n");
     return 0;
 }
 
-int float_withdrawal(void *self_ptr, const float amount, const bool debug) {
-    struct BankAccount *acc = self_ptr;
-
+/**
+ * @brief Convenience method to withdraw from a BankAccount with built-in value validation
+ * @param acc The BankAccount to withdraw from
+ * @param amount The amount to withdraw as a float
+ * @returns -1 if there is insufficient balance \n -2 if the amount is less than 0 \n 1 if the withdrawal is successful
+ */
+int float_withdrawal(struct BankAccount *acc, const float amount) {
     if (amount > acc->balance) {
-        if (debug)
-            printf("Invalid amount. Insufficient balance.\n");
-
-        return 0;
+        return -1;
     }
     if (amount <= 0) {
-        if (debug)
-            printf("Invalid amount. Enter a positive number: \n");
-
-        // while (getchar() != '\n') {
-        // }
-        // clear buffer
-        return 0;
+        return -2;
     }
-
-    if (amount <= acc->balance) {
-        acc->balance -= amount;
-        return 1;
-    }
-
-    return 0;
+    acc->balance -= amount;
+    return 1;
 }
 
-int withdrawal(void *self_ptr, const char *amount, const bool debug) {
+/**
+ * @brief Convenience method to withdraw from a BankAccount with built-in value and input validation
+ * @param acc The BankAccount to withdraw from
+ * @param amount The amount to withdraw as a string
+ * @returns -1 if there is insufficient balance \n -2 if the amount is less than 0 \n 0 if the input was invalid \n 1 if the withdrawal is successful
+ */
+int withdrawal(struct BankAccount *acc, const char *amount) {
     if (is_string_float(amount)) {
         char *end_ptr; // ignored for now
         const float float_amount = strtof(amount, &end_ptr);
-        if (float_withdrawal(self_ptr, float_amount, debug)) {
-            return 1;
-        }
-    } else {
-        printf("Please enter a positive float\n");
+        return float_withdrawal(acc, float_amount);
     }
     return 0;
 }
+
 
 int float_remittance(void *self_ptr, char recipient[], const float amount) {
     struct BankAccount *acc = self_ptr;
     struct BankAccount *receiver;
 
     if (is_valid_id(recipient)) {
-        // printf("get_account_from_id\n");
         receiver = get_account_from_id(recipient);
     } else {
-        // printf("get_account_from_name\n");
         receiver = get_account_from_name(recipient);
-        // printf("%s\n", acc->name);
     }
 
     if (amount <= acc->balance) {
         if (receiver != NULL) {
-            if (acc->float_withdrawal(acc, amount, true) && receiver->float_deposit(acc, amount)) {
+            if (float_withdrawal(acc, amount) == 1) {
+                float_deposit(acc, amount);
                 free(receiver);
                 return 1;
             }
-            // gotta bring to outer scope
-            // printf("Successfully transferred %f to %s", amount, receiver->name);
         }
         printf("Cannot find recipient account\n");
         return 0;
@@ -209,49 +291,20 @@ int remittance(void *self_ptr, char recipient[], const char *amount) {
     return 0;
 }
 
-
-// I forgot to initialize function pointers... this wasted so much time
-// TODO: Call in create_page(), get_account_from_id() and get_account_from_name();
-void init_account_methods(struct BankAccount *acc) {
-    acc->float_deposit = float_deposit;
-    acc->deposit = deposit;
-    acc->withdrawal = withdrawal;
-    acc->float_withdrawal = float_withdrawal;
-    acc->float_remittance = float_remittance;
-    acc->delete = NULL; // TODO : implement later
-}
-
-char const *account_types[] = {"Savings", "Current"};
-
-
-void print_divider() {
-    for (int i = 0; i < 50; i++) {
-        printf("-");
-    }
-    printf("\n");
-}
-
-
-// Quick dirty struct to get the count as well
+/**
+ * @brief Simple struct to get the list of BankAccounts as well as the size of the list from a method
+ */
 typedef struct {
     struct BankAccount *accounts;
     size_t count;
 } DatabaseResult;
 
-int is_txt_file(const char *filename) {
-    const size_t len = strlen(filename);
-    if (strcmp(filename + len - 4, ".txt") == 0) {
-        // Compare last 4 chars
-        return 1;
-    }
-    return 0;
-}
-
-const char *path_to_db = "./database";
-
-void load_or_create_database_folder(const int debug) {
-    DIR *dir_ptr = opendir(path_to_db);
-    if (debug) printf("Searching for Database...\n");
+/**
+ * @brief Create the database folder if absent
+ * @param debug Whether to print debug messages
+ */
+void create_database_folder_if_absent(const int debug) {
+    const DIR *dir_ptr = opendir(path_to_db);
     if (dir_ptr == NULL) {
         if (debug) printf("Database not found, creating Database folder...\n");
         mkdir(path_to_db);
@@ -259,16 +312,20 @@ void load_or_create_database_folder(const int debug) {
     } else {
         if (debug) printf("Database found!\n");
     }
-    // closedir(dir_ptr);
 }
 
+/**
+ * @brief Retrieves or creates the database
+ * @param debug Whether to print debug messages
+ * @return Return a DatabaseResult containing the accounts
+ */
 DatabaseResult
 load_or_create_database(const int debug) {
     DatabaseResult result = {NULL, 0};
     struct dirent *entry;
 
     DIR *dir_ptr = opendir(path_to_db);
-    load_or_create_database_folder(1);
+    create_database_folder_if_absent(1);
 
     if (debug) printf("Loading accounts...\n");
 
@@ -291,13 +348,8 @@ load_or_create_database(const int debug) {
             id[len - 4] = '\0';
 
             if (is_valid_id(id)) {
-                // This is a little redundant since we already have the file, but it would be nice to be able to pass in ID and get the account object from anywhere
-                // Edit: nvm it only gets the file name and doesn't open the file in memory yet
                 struct BankAccount *account = get_account_from_id(id);
                 if (!account) continue;
-                // printf("1");
-
-                // if (debug) printf("Count: %llu | Capacity: %llu", count, capacity);
 
                 if (count >= capacity) {
                     // Grow the array if count will exceed capacity
@@ -339,25 +391,18 @@ int save_or_update_account(struct BankAccount *account) {
     DIR *dir_ptr = opendir(path_to_db);
 
     if (dir_ptr == NULL) {
-        load_or_create_database_folder(0);
+        create_database_folder_if_absent(0);
         save_or_update_account(account);
     }
-    // printf("1\n");
-    FILE *file_ptr;
     char *id = 0;
     strcpy(id, account->id);
-    char *filename = id;
-    // printf("2\n");
-    // char *path_to_file;
-    // "./database/{ID}.txt"
-    strcat(filename, ".txt");
-    strcat(path_to_db, "/");
-    // printf(strcat(&path_to_db, filename));
+    char *file_name = id;
+    char *path_to_file = 0;
+    strcpy(path_to_file, path_to_db);
+    strcat(file_name, ".txt");
+    strcat(path_to_file, file_name);
 
-    // printf("3\n");
-    file_ptr = fopen(path_to_db, "w");
-    // printf("4\n");
-
+    FILE *file_ptr = fopen(path_to_db, "w");
 
     fprintf(file_ptr, "%s\n", account->id);
     fprintf(file_ptr, "%s\n", account->name);
@@ -371,46 +416,12 @@ int save_or_update_account(struct BankAccount *account) {
     return 1;
 }
 
-void main_menu(void); // So im guessing this is like an abstract method in Java (C prototype)
-void logout_page(void);
 
 static void print_list(const struct MenuList *menu) {
     for (size_t i = 0; i < menu->size; i++) {
         printf("%zu. %s\n", i + 1, menu->entries[i]);
     }
 }
-
-// Redundant for now as strcasecmp exists
-// static void string_to_lower_safe(const char *src, char *dst, size_t dst_size) {
-//     if (!src) return;
-//     size_t i = 0;
-//     while (src[i] && i < dst_size - 1) {
-//         dst[i] = (char) tolower(src[i]);
-//         i++;
-//     }
-//     dst[i] = '\0';
-// }
-
-static char *main_menu_entries_logged_out[] = {
-    "Create a New Bank Account", "Login to an Existing Bank Account"
-};
-
-static char *main_menu_entries_logged_in[] = {
-    "Deposit", "Withdrawal", "Remittance", "Logout", "Delete"
-};
-
-#define MAIN_MENU_LOGGED_IN_COUNT (sizeof(main_menu_entries_logged_in) / sizeof(main_menu_entries_logged_in[0]))
-#define MAIN_MENU_LOGGED_OUT_COUNT (sizeof(main_menu_entries_logged_out) / sizeof(main_menu_entries_logged_out[0]))
-
-struct MenuList main_menu_list_logged_in = {
-    MAIN_MENU_LOGGED_IN_COUNT,
-    main_menu_entries_logged_in,
-};
-
-struct MenuList main_menu_list_logged_out = {
-    MAIN_MENU_LOGGED_OUT_COUNT,
-    main_menu_entries_logged_out,
-};
 
 
 static void print_account_simple(const struct BankAccount *acc) {
@@ -425,95 +436,24 @@ static void print_account(const struct BankAccount *acc) {
     printf("Balance: %.2f\n", acc->balance);
 }
 
-
-int duplicate_id(long long id) {
+/**
+ * @brief Checks if an ID has already been generated before
+ * @param id The ID
+ * @return 0 if the ID is unique, 1 if duplicate
+ */
+int is_duplicate_id(long long id) {
     return 0; // For now, haven't set up database
 }
 
 long long generate_account_id() {
-    long long min_val = 1000000; // Smallest 7 digit
-    long long max_val = 999999999; // Largest 9 digit
-
     long long id;
-    while (true) {
-        // Basically this is how other languages does intInRange or similar
-        id = rand() % (max_val - min_val + 1) + min_val;
-        if (!duplicate_id(id)) break; // To ensure its distinct, placeholder method for now
+    while (1) {
+        id = rand() % (999999999 - 1000000 + 1) + 1000000;
+        if (!is_duplicate_id(id)) break; // To ensure its distinct, placeholder method for now
     }
     return id;
 }
 
-
-int min(const int a, const int b) {
-    return a < b ? a : b;
-}
-
-int max(const int a, const int b) {
-    return a > b ? a : b;
-}
-
-// https://www.geeksforgeeks.org/dsa/damerau-levenshtein-distance/
-// Converted from Java to C since I am most comfortable with Java
-// DLD isn't that good on its own, well in this case its just Levenshtein distance, for example 'dep' and 'del' both give the same distance from Delete and Deposit
-// int optimalStringAlignmentDistance(char s1[], char s2[]) {
-//     int size_s1 = strlen(s1);
-//     int size_s2 = strlen(s2);
-//
-//     int dp[size_s1 + 1][size_s2 + 1];
-//
-//     for (int i = 0; i <= size_s1; i++) {
-//         dp[i][0] = i;
-//     }
-//     for (int j = 0; j <= size_s2; j++) {
-//         dp[0][j] = j;
-//     }
-//
-//     for (int i = 1; i <= size_s1; i++) {
-//         for (int j = 1; j <= size_s2; j++) {
-//             if (s1[i - 1] == s2[j - 1]) {
-//                 dp[i][j] = dp[i - 1][j - 1];
-//             } else {
-//                 dp[i][j] = 1 + min(min(dp[i - 1][j], dp[i][j - 1]), dp[i - 1][j - 1]);
-//             }
-//         }
-//     }
-//
-//     return dp[size_s1][size_s2];
-// }
-//
-//
-// int get_suitable_option(const struct MenuList *menu, char input[50]) {
-//     int best_idx = -1;
-//     int min_dist = INT_MAX;
-//
-//     char lower_in[50] = {0};
-//     for (int j = 0; input[j] && j < 49; ++j) {
-//         lower_in[j] = tolower((unsigned char) input[j]);
-//     }
-//
-//     for (int i = 0; i < menu->size; i++) {
-//         char *entry = menu->entries[i];
-//         char *space = strchr(entry, ' ');
-//
-//         int len = space ? space - entry : strlen(entry);
-//
-//         char first[64] = {0};
-//         for (int j = 0; j < len && j < 63; ++j) {
-//             first[j] = tolower((unsigned char) entry[j]);
-//         }
-//
-//         int dist = optimalStringAlignmentDistance(first, lower_in);
-//
-//         if (dist < min_dist) {
-//             min_dist = dist;
-//             best_idx = i;
-//         }
-//     }
-//     return best_idx;
-// }
-
-
-// Wow C doesn't support overloading...
 int get_suitable_option_from_list(char *list[], size_t length, char input[50]) {
     if (isdigit(input[0])) {
         const int option = input[0] - '0' - 1; // Returns ASCII by itself, need to convert
@@ -586,56 +526,58 @@ void delete_page() {
 }
 
 void deposit_page() {
-    // printf("Enter the amount you would like to Withdraw: \n");
-    // fflush(stdout);
-
     char *input;
-    char *end_ptr;
-
+    char *ignored;
 
     get_string("Enter the amount you would like to Deposit: \n", &input);
 
-    if (current_account->deposit(current_account, input)) {
-        printf("Deposited %.2f successfully!\n", strtof(input, &end_ptr));
-        // should be able to just call strtof here because already validated
+    if (deposit(current_account, input)) {
+        printf("Deposited %.2f successfully!\n", strtof(input, &ignored));
     } else {
         deposit_page();
     }
-
 
     main_menu();
 }
 
 void withdrawal_page() {
-    // printf("Enter the amount you would like to Withdraw: \n");
-    // fflush(stdout);
-
     char *input;
-    char *end_ptr;
-
+    char *ignored;
 
     get_string("Enter the amount you would like to Withdraw: \n", &input);
 
-    if (current_account->withdrawal(current_account, input, true)) {
-        printf("Withdrew %.2f successfully!\n", strtof(input, &end_ptr));
-        // should be able to just call strtof here because already validated
-    } else {
-        withdrawal_page();
+    const int code = withdrawal(current_account, input);
+
+    switch (code) {
+        case -1: {
+            printf("Insufficient balance");
+            withdrawal_page();
+            break;
+        }
+        case -2: {
+            printf("Cannot withdraw an amount less than 0");
+            withdrawal_page();
+            break;
+        }
+        case 0: {
+            printf("Invalid input, input should be a positive number");
+            withdrawal_page();
+        }
+        default:
+            printf("Withdrew %.2f successfully!\n", strtof(input, &ignored));
+            main_menu();
     }
-
-
-    main_menu();
 }
 
 void remittance_page() {
     char *account;
     print_divider();
     const DatabaseResult database_result = load_or_create_database(true);
-    // for (int i = 0; i < database_result.count; i++) {
-    //     struct BankAccount bank_account = database_result.accounts[i];
-    //     if (bank_account.equal(&bank_account, *current_account)) continue;
-    //     print_account_simple(&database_result.accounts[i]);
-    // }
+    for (int i = 0; i < database_result.count; i++) {
+        struct BankAccount bank_account = database_result.accounts[i];
+        if (equal(&bank_account, current_account)) continue;
+        print_account_simple(&database_result.accounts[i]);
+    }
     print_divider();
     get_string("Enter the account ID or name you would like to transfer to: \n", &account);
 
@@ -658,10 +600,6 @@ void remittance_page() {
         return;
     }
 
-    if (current_account->float_remittance(current_account, account, amount)) {
-        printf("Withdrew %.2f successfully!\n", amount);
-    }
-    // current_account->withdrawal(current_account, amount);
 
     free(database_result.accounts);
     main_menu();
@@ -751,7 +689,6 @@ void create_page() {
     printf("Successfully created a New Account!\n");
     current_account = acc;
     save_or_update_account(acc);
-    init_account_methods(acc);
     main_menu();
 }
 
@@ -764,7 +701,6 @@ struct BankAccount *get_account_from_id(char *id) {
 
     if (!acc) return NULL;
 
-    init_account_methods(acc);
 
     char path[256];
     int len = snprintf(path, sizeof(path), "./database/%s.txt", id);
@@ -818,7 +754,6 @@ struct BankAccount *get_account_from_name(char *name) {
             struct BankAccount *copy = malloc(sizeof(struct BankAccount));
             if (copy) {
                 *copy = db_result.accounts[i];
-                init_account_methods(copy);
             }
 
             free(db_result.accounts);
@@ -892,15 +827,15 @@ void main_menu() {
     int loggedIn = current_account != NULL;
 
     if (loggedIn) {
-        print_list(&main_menu_list_logged_in);
+        print_list(&main_menu_logged_in);
     } else {
-        print_list(&main_menu_list_logged_out);
+        print_list(&main_menu_logged_out);
     }
     fgets(input, sizeof(input), stdin);
 
     int option = loggedIn
-                     ? get_suitable_option_from_menu_list(&main_menu_list_logged_in, input)
-                     : get_suitable_option_from_menu_list(&main_menu_list_logged_out, input);
+                     ? get_suitable_option_from_menu_list(&main_menu_logged_in, input)
+                     : get_suitable_option_from_menu_list(&main_menu_logged_out, input);
 
     if (option == -1) {
         // If invalid, call the function again
@@ -960,6 +895,7 @@ void logout_page() {
 }
 
 int main() {
+    enable_utf8();
     print_logo();
     print_date_and_time();
 
