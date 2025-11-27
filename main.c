@@ -31,7 +31,9 @@ typedef enum {
     ERR_INVALID_ACCOUNT_NUMBER_LENGTH = -13,
     ERR_INVALID_ACCOUNT_NUMBER_FORMAT = -14,
     ERR_INVALID_ACCOUNT_NAME_FORMAT = -15,
-    ERR_MALFORMED_FILE = -16
+    ERR_MALFORMED_FILE = -16,
+    ERR_INVALID_ID_FORMAT = -17,
+    ERR_INVALID_ID_LENGTH = -18
 } ErrorCode;
 
 void handle_error_message(const ErrorCode code) {
@@ -64,6 +66,10 @@ void handle_error_message(const ErrorCode code) {
             break;
         case ERR_INVALID_OPTION: printf("Invalid option!\n");
             break;
+        case ERR_INVALID_ID_FORMAT: printf("Invalid Account ID format!\n");
+            break;
+        case ERR_INVALID_ID_LENGTH: printf("Invalid Account ID length!\n");
+            break;
         default: printf("Operation failed (unknown error)\n");
             break;
     }
@@ -88,9 +94,19 @@ static void enable_utf8() {
  * @brief Quickly prints a horizontal line composed of "━" characters
  * @remark On windows, @link enable_utf8 @endlink needs to be called first
  */
-void print_divider() {
+void print_divider_thick() {
     for (int i = 0; i < 50; i++)
         printf("━");
+    printf("\n");
+}
+
+/**
+ * @brief Quickly prints a horizontal line composed of "─" characters
+ * @remark On windows, @link enable_utf8 @endlink needs to be called first
+ */
+void print_divider_thin() {
+    for (int i = 0; i < 50; i++)
+        printf("─");
     printf("\n");
 }
 
@@ -108,28 +124,36 @@ int is_txt_file(const char *file_name) {
 }
 
 /**
- * @brief Gets the string input of any length
- *
- * @param prompt Optional prompt
- * @param p_str Pointer to store the input to
- *
- * @remark <a href="https://www.sololearn.com/en/compiler-playground/c5AkrEzE6i02/?ref=app">Source</a>
+ * Safely get an input of any length
+ * @return The string of the input
+ * @remark <a href="https://github.com/muhsinzara/unlimited-string-in-C/blob/master/usic.c">Source</a>
  */
-void get_string(char *prompt, char **p_str) {
-    printf("%s", prompt);
-    for (int i = 0; 1; i++) {
-        if (i) {
-            *p_str = (char *) realloc(*p_str, i * 2);
-        } else {
-            *p_str = (char *) malloc(i + 1);
-        }
-
-        (*p_str)[i] = getchar();
-        if ((*p_str)[i] == '\n' || (*p_str)[i] == EOF) {
-            (*p_str)[i] = '\0';
-            break;
-        }
+char *get_input() {
+    size_t size = 2;
+    size_t length = 0;
+    char *buffer = malloc(size);
+    if (!buffer) {
+        fprintf(stderr, "Failed to allocate memory\n");
+        return NULL;
     }
+
+    int ch;
+    while ((ch = getchar()) != '\n' && ch != EOF) {
+        if (length + 1 >= size) {
+            size *= 2;
+            char *newBuffer = realloc(buffer, size);
+            if (!newBuffer) {
+                fprintf(stderr, "Failed to reallocate memory\n");
+                free(buffer);
+                return NULL;
+            }
+            buffer = newBuffer;
+        }
+        buffer[length++] = (char) ch;
+    }
+    buffer[length] = '\0';
+
+    return buffer;
 }
 
 
@@ -167,9 +191,9 @@ enum AccountType {
 struct BankAccount {
     char name[100]; // The Account/User's name
 
-    char id[100];
-    // Coursework didn't specify much for this, so I will make it similar to BankAccount->account_number (10-digit number)
     char account_number[100];
+    // Coursework didn't specify much for this, so I will make it similar to BankAccount->account_number (10-digit number)
+    char id[100];
     // I almost forgot that id =/= account_number, not sure why we need 2 different ID's but sure
     // Decided to store both as strings
     // Edit: Storing as long might be easier
@@ -193,6 +217,9 @@ void remittance_page(void);
 
 void logout_page(void);
 
+char *get_valid_identifier();
+
+struct BankAccount *get_account_from_identifier(char *identifier);
 
 /**
  * @brief Abstract method to get the account from @p BankAccount::id
@@ -208,7 +235,7 @@ struct BankAccount *get_account_from_id(char *id);
  * @param account_number The queried account number in the form of a string
  * @return BankAccount with corresponding id if present
  */
-struct BankAccount *get_account_from_account_number(const char *account_number);
+struct BankAccount *get_account_from_account_number(char *account_number);
 
 /**
  * @brief Abstract method to get the account from @p BankAccount::name
@@ -239,50 +266,56 @@ static const struct MenuList main_menu_logged_in = {
 };
 
 static const struct MenuList main_menu_logged_out = {
-    .size = 2,
+    .size = 3,
     .entries = {
         "Create a New Bank Account",
-        "Login to an Existing Bank Account"
+        "Login to an Existing Bank Account",
+        "Exit"
     }
 };
 
 static const struct MenuList main_menu_logged_out_no_accounts = {
-    .size = 1,
+    .size = 2,
     .entries = {
-        "Create a New Bank Account"
+        "Create a New Bank Account",
+        "Exit"
     }
 };
+
+
+/**
+ * @brief Validates a @p BankAccount::account_number
+ * @param number The account number to be validated in the form of a string
+ * @return
+ * @p ERR_INVALID_ACCOUNT_NUMBER_LENGTH If the length is not between 7-9 \n
+ * @p ERR_INVALID_ACCOUNT_NUMBER_FORMAT If the number contains a non-digit \n
+ * @p SUCCESS If none of the above
+ */
+ErrorCode is_valid_account_number(const char *number) {
+    const size_t len = strlen(number);
+    if (len < 7 || len > 9) return ERR_INVALID_ACCOUNT_NUMBER_LENGTH;
+
+    for (size_t i = 0; i < len; i++) {
+        if (!isdigit((unsigned char) number[i])) return ERR_INVALID_ACCOUNT_NUMBER_FORMAT;
+    }
+    return SUCCESS;
+}
 
 
 /**
  * @brief Validates a @p BankAccount::id
  * @param id The ID to be validated in the form of a string
- * @return 1 if the ID is between 7-9 chars and every char is a digit, else 0
- */
-int is_valid_id(const char *id) {
-    const size_t len = strlen(id);
-    if (len < 7 || len > 9) return 0;
-
-    for (size_t i = 0; i < len; i++) {
-        if (!isdigit((unsigned char) id[i])) return 0;
-    }
-    return 1;
-}
-
-/**
- * @brief Validates a @p BankAccount::account_number
- * @param id The account number to be validated in the form of a string
  * @return
- * @p ERR_INVALID_ACCOUNT_NUMBER_LENGTH If the length is not 10 \n
- * @p ERR_INVALID_ACCOUNT_NUMBER_FORMAT If the name contains a digit \n
+ * @p ERR_INVALID_ID_LENGTH If the length is not 10 \n
+ * @p ERR_INVALID_ID_FORMAT If the id contains a non-digit \n
  * @p SUCCESS If none of the above
  */
-ErrorCode is_valid_account_number(const char *id) {
+ErrorCode is_valid_id(const char *id) {
     const size_t len = strlen(id);
-    if (len != 10) return ERR_INVALID_ACCOUNT_NUMBER_LENGTH;
+    if (len != 10) return ERR_INVALID_ID_LENGTH;
 
     for (size_t i = 0; i < len; i++) {
-        if (!isdigit((unsigned char) id[i])) return ERR_INVALID_ACCOUNT_NUMBER_FORMAT;
+        if (!isdigit((unsigned char) id[i])) return ERR_INVALID_ID_FORMAT;
     }
     return SUCCESS;
 }
@@ -335,7 +368,7 @@ static int equal(const struct BankAccount *acc, const struct BankAccount *other)
     if (!other) return 0;
     if (acc->balance != acc->balance) return 0;
     if (strcmp(acc->pin, other->pin) != 0) return 0;
-    if (strcmp(acc->id, other->id) != 0) return 0;
+    if (strcmp(acc->account_number, other->account_number) != 0) return 0;
     if (acc->account_type != other->account_type) return 0;
     if (difftime(acc->date_created, other->date_created) != 0) return 0;
     if (strcmp(acc->name, other->name) != 0) return 0;
@@ -418,6 +451,18 @@ static ErrorCode withdrawal(struct BankAccount *acc, const char *amount_str) {
     return float_withdrawal(acc, amount);
 }
 
+float get_tax(const struct BankAccount *sender, const struct BankAccount *recipient, const float amount) {
+    float amount_taxed = amount;
+    if (sender->account_type == SAVINGS && recipient->account_type == CURRENT) {
+        amount_taxed *= .02F;
+    } else if (sender->account_type == CURRENT && recipient->account_type == SAVINGS) {
+        amount_taxed *= .03F;
+    } else {
+        amount_taxed = 0;
+    }
+    return amount_taxed;
+}
+
 /**
  * @brief Transfer cash to another BankAccount with built-in value validation
  * @param sender The sender
@@ -432,20 +477,16 @@ static ErrorCode withdrawal(struct BankAccount *acc, const char *amount_str) {
  */
 static ErrorCode float_remittance(struct BankAccount *sender, struct BankAccount *recipient, const float amount) {
     if (amount < 0) return ERR_INVALID_AMOUNT;
-    if (sender == recipient) return ERR_SELF_TRANSFER;
-
-    float amount_taxed = amount;
-    if (sender->account_type == SAVINGS && recipient->account_type == CURRENT) {
-        amount_taxed *= 1.02F;
-    } else if (sender->account_type == CURRENT && recipient->account_type == SAVINGS) {
-        amount_taxed *= 1.03F;
-    }
+    if (equal(sender, recipient)) return ERR_SELF_TRANSFER;
 
 
-    sender->balance -= amount;
+    const float tax = get_tax(sender, recipient, amount);
+
+    if (tax + amount > sender->balance) return ERR_INSUFFICIENT;
+    // Tax goes to bank
+    sender->balance -= tax + amount;
     recipient->balance += amount;
 
-    if (amount_taxed > sender->balance) return ERR_INSUFFICIENT;
     if (!save_or_update_account(sender)) return ERR_SAVE_FAILED;
     if (!save_or_update_account(recipient)) return ERR_SAVE_FAILED;
 
@@ -520,7 +561,7 @@ load_or_create_database(const int debug) {
         return result;
     }
     while ((entry = readdir(dir_ptr)) != NULL) {
-        char *file_name = entry->d_name;
+        const char *file_name = entry->d_name;
         if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0)
             continue;
         if (is_txt_file(file_name)) {
@@ -529,8 +570,8 @@ load_or_create_database(const int debug) {
             strncpy(id, entry->d_name, len - 4);
             id[len - 4] = '\0';
 
-            if (is_valid_id(id)) {
-                struct BankAccount *account = get_account_from_id(id);
+            if (is_valid_account_number(id)) {
+                struct BankAccount *account = get_account_from_account_number(id);
                 if (!account) continue;
 
                 if (count >= capacity) {
@@ -559,7 +600,7 @@ load_or_create_database(const int debug) {
             printf("No accounts found!\n");
         } else {
             printf("Loaded %llu account%s!\n", count, count == 1 ? "" : "s");
-            print_divider();
+            print_divider_thick();
         }
     }
 
@@ -575,7 +616,7 @@ load_or_create_database(const int debug) {
  */
 int save_or_update_account(struct BankAccount *account) {
     char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s.txt", path_to_db, account->id);
+    snprintf(filepath, sizeof(filepath), "%s/%s.txt", path_to_db, account->account_number);
 
     FILE *file = fopen(filepath, "w");
     if (!file) {
@@ -602,7 +643,7 @@ int save_or_update_account(struct BankAccount *account) {
  */
 static void print_list(const struct MenuList *menu) {
     for (size_t i = 0; i < menu->size; i++) {
-        printf("%zu. %s\n", i + 1, menu->entries[i]);
+        printf("%d. %s\n", (int) (i + 1), menu->entries[i]);
     }
 }
 
@@ -612,7 +653,9 @@ static void print_list(const struct MenuList *menu) {
  */
 static void print_account_simple(const struct BankAccount *acc) {
     printf("Name: %s\n", acc->name);
+    printf("Account Number: %s\n", acc->account_number);
     printf("ID: %s\n", acc->id);
+    printf("Type: %s\n", account_types[acc->account_type]);
 }
 
 /**
@@ -621,35 +664,72 @@ static void print_account_simple(const struct BankAccount *acc) {
  */
 static void print_account(const struct BankAccount *acc) {
     print_account_simple(acc);
-    printf("Type: %s\n", account_types[acc->account_type]);
     printf("Date Created: %s", ctime(&acc->date_created)); // pass address
     printf("Balance: %.2f\n", acc->balance);
 }
 
-/**
- * @brief Checks if an ID has already been generated before
- * @param id The ID
- * @return 0 if the ID is unique\n 1 if duplicate
- */
-int is_duplicate_id(long id) {
-    return 0; // TODO:
-}
 
 /**
  * @brief Checks if a BankAccount number has already been generated before
  * @param account_number The account number to validate
- * @return 0 if the ID is unique\n 1 if duplicate
+ * @return 1 if the number is unique\n 0 if duplicate
  */
-int is_duplicate_account_number(long account_number) {
-    return 0; // TODO:
+int is_distinct_account_number(const char *account_number) {
+    const DatabaseResult result = load_or_create_database(0);
+    for (int i = 0; i < result.count; i++) {
+        const struct BankAccount account = result.accounts[i];
+        if (strcmp(account.account_number, account_number) == 0) {
+            return 0;
+        }
+    }
+    free(result.accounts);
+    return 1;
+}
+
+
+/**
+ * @brief Checks if an ID has already been generated before
+ * @param id The ID
+ * @return 1 if the ID is unique\n 0 if duplicate
+ */
+int is_distinct_id(const char *id) {
+    const DatabaseResult result = load_or_create_database(0);
+    for (int i = 0; i < result.count; i++) {
+        const struct BankAccount account = result.accounts[i];
+        if (strcmp(account.id, id) == 0) {
+            free(result.accounts);
+            return 0;
+        }
+    }
+    free(result.accounts);
+    return 1;
 }
 
 /**
- * Generates an ID for a BankAccount
- * @return A unique ID ranging from 7-9 digits
+ * @brief Checks if a Name has  been used before
+ * @param name The Name
+ * @return 1 if the ID is unique\n 0 if duplicate
  */
-char *generate_account_id() {
-    char *id_str[10];
+int is_distinct_name(const char *name) {
+    const DatabaseResult result = load_or_create_database(0);
+    int count = 0;
+    for (int i = 0; i < result.count; i++) {
+        const struct BankAccount account = result.accounts[i];
+        if (strcasecmp(account.name, name) == 0) {
+            count++;
+        }
+        if (count > 1) return 0;
+    }
+    free(result.accounts);
+    return 1;
+}
+
+/**
+ * Generates an account number for a BankAccount
+ * @return A unique number ranging from 7-9 digits
+ */
+char *generate_account_number() {
+    unsigned char id_str[10];
     while (1) {
         // Seed it first
         srand(time(0));
@@ -658,16 +738,31 @@ char *generate_account_id() {
         // rand() % (max_number + 1 - minimum_number) + minimum_number
 
         const int digits = rand() % 3 + 7;
-        long id = 0;
 
         // At first, I wanted to concat a bunch of digits into a string and return that, but this is cleaner
         // Basically shift left and then add 0-9 to the end, repeat until the ID is fully built
+        // for (int i = 0; i < digits; i++) {
+        //     id = id * 10 + rand() % 10;
+        // }
+        // Above implementation lacks the ability to have an ID start with 0
+
+
+        id_str[0] = '\0'; // Clear the buffer first
+        // Now let us build
         for (int i = 0; i < digits; i++) {
-            id = id * 10 + rand() % 10;
+            id_str[i] = '0' + rand() % 10;
+            // We take ASCII value of 0 which is 48, and then just add 0-9, which corresponds to 48-57 which is the chars '0' to '9'
         }
+        id_str[digits] = '\0'; // Terminate the string
+
 
         // To ensure its distinct, placeholder method for now
-        if (!is_duplicate_id(id)) return id;
+        if (is_distinct_id(id_str)) {
+            char *result = malloc(digits + 1);
+            strcpy(result, id_str);
+            // Can't return a local address since it gets deleted
+            return result;
+        }
     }
 }
 
@@ -678,7 +773,7 @@ char *generate_account_id() {
  * @param input The input (must be less than 50 chars)
  * @return Index of the most suitable option in the list
  */
-int get_suitable_option_from_list(const char *const list[], size_t length, const char *input) {
+int get_suitable_option_from_list(const char *const list[], const size_t length, const char *input) {
     if (isdigit(input[0])) {
         const int option = input[0] - '0' - 1; // Returns ASCII by itself, need to convert
         if (option < length)
@@ -745,7 +840,7 @@ int get_suitable_option_from_list(const char *const list[], size_t length, const
  * @param input String that is less than 50 chars
  * @return Index of the most suitable option of the MenuList
  */
-int get_suitable_option_from_menu_list(const struct MenuList *menu, char input[50]) {
+int get_suitable_option_from_menu_list(const struct MenuList *menu, const char *input) {
     return get_suitable_option_from_list(menu->entries, menu->size, input);
 }
 
@@ -757,8 +852,8 @@ void delete_page() {
  * @brief Wrapper to handle deposit flow
  */
 void deposit_page() {
-    char *input;
-    get_string("Enter the amount you would like to Deposit: \n", &input);
+    printf("Enter the amount you would like to Deposit: \n");
+    char *input = get_input();
 
     const ErrorCode code = deposit(current_account, input);
     if (code == SUCCESS) {
@@ -768,15 +863,17 @@ void deposit_page() {
         handle_error_message(code);
         deposit_page();
     }
+    if (input)
+        free(input);
 }
 
 /**
  * Wrapper to handle withdrawal flow with feedback based on input
  */
 void withdrawal_page() {
-    char *input;
     printf("Current Balance: %.2f", current_account->balance);
-    get_string("Enter the amount you would like to Withdraw: \n", &input);
+    printf("Enter the amount you would like to Withdraw: \n");
+    char *input = get_input();
 
     const ErrorCode code = withdrawal(current_account, input);
     if (code == SUCCESS) {
@@ -786,6 +883,8 @@ void withdrawal_page() {
         handle_error_message(code);
         withdrawal_page();
     }
+    if (input)
+        free(input);
 }
 
 DatabaseResult print_loaded_accounts() {
@@ -794,27 +893,27 @@ DatabaseResult print_loaded_accounts() {
         struct BankAccount bank_account = database_result.accounts[i];
         if (equal(&bank_account, current_account)) continue;
         print_account_simple(&database_result.accounts[i]);
+        if (i == database_result.count - 1) {
+            print_divider_thick();
+            break;
+        }
+        print_divider_thin();
     }
     return database_result;
 }
 
 void remittance_page() {
-    print_divider();
+    print_divider_thick();
     const DatabaseResult db_res = print_loaded_accounts();
-    print_divider();
 
+    printf("Enter the recipients Account Number, ID or Name: \n");
+    char *identifier = get_valid_identifier();
 
-    char *target = NULL;
-    get_string("Enter recipient ID or Name: ", &target);
-
-    struct BankAccount *recipient = NULL;
-    if (is_valid_id(target))
-        recipient = get_account_from_id(target);
-    else recipient = get_account_from_name(target);
+    struct BankAccount *recipient = get_account_from_identifier(identifier);
 
     if (!recipient) {
         handle_error_message(ERR_ACCOUNT_NOT_FOUND);
-        free(target);
+        free(identifier);
         free(db_res.accounts);
         main_menu();
         return;
@@ -822,7 +921,7 @@ void remittance_page() {
     if (equal(recipient, current_account)) {
         handle_error_message(ERR_SELF_TRANSFER);
         free(recipient);
-        free(target);
+        free(identifier);
         free(db_res.accounts);
         main_menu();
         return;
@@ -830,9 +929,11 @@ void remittance_page() {
 
     // IDE giving so many false positives...
 
-    char *amount_str = NULL;
 
-    get_string("Enter the amount you would like to transfer:\n", &amount_str);
+    printf("Transferable balance: %f\n",
+           current_account->balance - get_tax(current_account, recipient, current_account->balance));
+    printf("Enter the amount you would like to transfer:\n");
+    char *amount_str = get_input();
 
     const ErrorCode code = remittance(current_account, recipient, amount_str);
     if (code == SUCCESS) {
@@ -841,7 +942,7 @@ void remittance_page() {
 
     free(amount_str);
     free(recipient);
-    free(target);
+    free(identifier);
     free(db_res.accounts);
     main_menu();
 }
@@ -849,7 +950,7 @@ void remittance_page() {
 void print_date_and_time() {
     time_t current_time;
     time(&current_time);
-    printf("Current time: %s\n", ctime(&current_time));
+    printf("Current time: %s", ctime(&current_time));
 }
 
 
@@ -861,7 +962,8 @@ void create_page() {
     char *name;
 
     while (1) {
-        get_string("Enter your Name:\n", &name);
+        printf("Enter your Name:\n");
+        name = get_input();
         const ErrorCode code = is_valid_name(name);
         if (code == SUCCESS)
             break;
@@ -870,9 +972,9 @@ void create_page() {
     strcpy(acc->name, name);
 
     int option;
-    char *account_type_string;
     while (1) {
-        get_string("Enter your account type (Savings/Current):\n", &account_type_string);
+        printf("Enter your account type (Savings/Current):\n");
+        const char *account_type_string = get_input();
         option = get_suitable_option_from_list(account_types, NUM_ACCOUNT_TYPES, account_type_string);
 
         if (option == -1) {
@@ -883,19 +985,21 @@ void create_page() {
     }
 
     while (1) {
-        get_string("Enter your 10-digit account number:\n", &account_number);
-        const ErrorCode code = is_valid_account_number(account_number);
+        printf("Enter your 10-digit account number:\n");
+        account_number = get_input();
+        const ErrorCode code = is_valid_id(account_number);
         if (code == SUCCESS)
             break;
         handle_error_message(code);
     }
-    strcpy(acc->account_number, account_number);
+    strcpy(acc->id, account_number);
 
     const enum AccountType account_type = (enum AccountType) option;
     acc->account_type = account_type;
 
     while (1) {
-        get_string("Enter your 4-digit PIN:\n", &pin);
+        printf("Enter your 4-digit PIN:\n");
+        pin = get_input();
         const ErrorCode code = is_valid_pin(pin);
         if (code == SUCCESS)
             break;
@@ -904,7 +1008,7 @@ void create_page() {
     strcpy(acc->pin, pin);
 
 
-    sprintf(acc->id, "%llu", generate_account_id());
+    sprintf(acc->account_number, "%s", generate_account_number());
     acc->balance = 0;
     time_t current_time;
     time(&current_time);
@@ -927,14 +1031,14 @@ ErrorCode validate_file(FILE *file, struct BankAccount *acc) {
                "%4s\n" // pin (4 digits)
                "%lld\n" // date_created
                "%lf", // balance
-               acc->id, acc->account_number, acc->name, (int *) &acc->account_type, acc->pin,
+               acc->account_number, acc->id, acc->name, (int *) &acc->account_type, acc->pin,
                &acc->date_created, &acc->balance) != 7) {
         return ERR_MALFORMED_FILE;
     }
     return SUCCESS;
 }
 
-struct BankAccount *get_account_from_id(char *id) {
+struct BankAccount *get_account_from_account_number(char *id) {
     if (!id || id[0] == '\0') return NULL;
     struct BankAccount *acc = malloc(sizeof *acc);
     if (!acc) return NULL;
@@ -978,14 +1082,14 @@ struct BankAccount *get_account_from_name(const char *name) {
     return NULL;
 }
 
-struct BankAccount *get_account_from_account_number(const char *account_number) {
+struct BankAccount *get_account_from_id(char *id) {
     const DatabaseResult db_result = load_or_create_database(false);
     if (db_result.count == 0) {
         free(db_result.accounts);
         return NULL;
     }
     for (size_t i = 0; i < db_result.count; i++) {
-        if (strcasecmp(db_result.accounts[i].account_number, account_number) == 0) {
+        if (strcasecmp(db_result.accounts[i].id, id) == 0) {
             struct BankAccount *copy = malloc(sizeof(struct BankAccount));
             if (copy) {
                 *copy = db_result.accounts[i];
@@ -997,38 +1101,94 @@ struct BankAccount *get_account_from_account_number(const char *account_number) 
     return NULL;
 }
 
-struct BankAccount *get_bank_account_from_identifier(char *identifier) {
-    if (is_valid_id(identifier)) {
-        return get_account_from_id(identifier);
+/**
+ * Tries to identify and return a BankAccount related to the identifier
+ * @param identifier The identifier to test with
+ * @return The BankAccount if present, NULL if absent
+ * @remark Checks in order of name -> account number -> account ID
+ */
+struct BankAccount *get_account_from_identifier(char *identifier) {
+    struct BankAccount *from_name = get_account_from_name(identifier);
+    struct BankAccount *from_id = get_account_from_id(identifier);
+    struct BankAccount *from_number = get_account_from_account_number(identifier);
+
+    if (from_name != NULL) {
+        return from_name;
     }
-    if (is_valid_account_number(identifier)) {
-        return get_account_from_account_number(identifier);
+    if (from_id != NULL) {
+        return from_id;
     }
-    return get_account_from_name(identifier);
+    if (from_number != NULL) {
+        return from_number;
+    }
+
+    return NULL;
 }
 
-int login(char *identifier, char *pin) {
-    struct BankAccount *acc = get_bank_account_from_identifier(identifier);
+int login(char *identifier, const char *pin) {
+    struct BankAccount *acc = get_account_from_identifier(identifier);
 
     if (acc == NULL) {
         printf("Failed to Login: Account not found\n");
         return 0;
     }
-    if (!is_valid_pin(pin)) {
+
+    if (is_valid_pin(pin) != SUCCESS) {
         free(acc);
-        return 1;
+        return 0;
     }
+
     printf("Successfully logged in to %s\n", acc->name);
     current_account = acc;
     return 1;
 }
 
-void login_page() {
-    char *identifier = NULL;
-    get_string("Enter your Account Number, ID or Name: \n", &identifier);
+/**
+ * @brief Prompts and validates for a correct identifier, usually to be passed into get_bank_account_from_identifier()
+ * @param identifier The identifier to validate
+ * @return The validated identifier
+ */
+char *get_valid_identifier() {
+    while (1) {
+        char *input = get_input();
+        if (!input) continue;
 
-    char *pin = NULL;
-    get_string("Enter your 4-Digit PIN\n", &pin);
+        int valid_name = is_valid_name(input) == SUCCESS;
+        int valid_number = is_valid_account_number(input) == SUCCESS;
+        int valid_id = is_valid_id(input) == SUCCESS;
+
+        if (valid_number) return input;
+        if (valid_name && is_distinct_name(input)) return input;
+        if (valid_id && is_distinct_id(input)) return input;
+
+        if (valid_name) {
+            printf("Multiple accounts with this name. Enter ID, Account Number, or different name: \n");
+        } else if (valid_id) {
+            printf("Multiple accounts with this ID. Enter your Account Number or Account Name: \n");
+        } else {
+            printf("Invalid input. Enter ID (7-9 digits), Account Number (10 digits), or name: \n");
+        }
+
+        free(input);
+    }
+}
+
+void login_page() {
+    printf("Enter your Account Number, ID or Name: \n");
+
+    // Let me think about this
+    // User enters name -> multiple found -> prompts to enter Number or ID -> user still enters name -> but this time it's another name -> go thru
+    // User enters name -> multiple found -> prompts to enter Number or ID -> user still enters the same name -> prompts to enter Number or ID ->
+    // repeat if user is stubborn -> until user either enters a different distinct name or a Number or ID
+    // Luckily we don't need to differentiate ID and Number since their lengths will never overlap (7-9) and 10
+    // But we do need to check for duplicate Numbers just in case, I will probably implement duplicate checking when creating accounts but just in case
+    // User enters name -> multiple found -> prompts to enter Number or ID -> user enters Number -> duplicate Number -> prompts to enter either ID or Name ->
+    // enters Name -> repeat -> enters ID -> pass
+
+    char *identifier = get_valid_identifier();
+
+    printf("Enter your 4-Digit PIN:\n");
+    char *pin = get_input();
 
     login(identifier, pin);
     main_menu();
@@ -1038,26 +1198,14 @@ void login_page() {
 
 void print_login_details() {
     if (current_account == NULL) {
-        printf("Not currently logged in\n");
+        printf("You aren't logged in!\n");
     } else {
         print_account(current_account);
     }
 }
 
-void print_logo() {
-    printf("  _   _  ___  ___ __  __   ___            _   _             ___         _               \n");
-    printf(" | | | |/ _ \\/ __|  \\/  | | _ ) __ _ _ _ | |_(_)_ _  __ _  / __|_  _ __| |_ ___ _ __  \n");
-    printf(" | |_| | (_) \\__ \\ |\\/| | | _ \\/ _` | ' \\| / / | ' \\/ _` | \\__ \\ || (_-<  _/ -_) '  \\   \n");
-    printf("  \\___/ \\___/|___/_|  |_| |___/\\__,_|_||_|_\\_\\_|_||_\\__, | |___/\\_, /__/\\__\\___|_|_|_|  \n");
-    printf("                                                    |___/       |__/                    \n");
-    print_divider();
-}
-
 void main_menu() {
     print_login_details();
-    fflush(stdin);
-
-    char input[50];
     const int loggedIn = current_account != NULL;
     const int account_count = load_or_create_database(0).count;
     const struct MenuList *list = loggedIn
@@ -1067,19 +1215,23 @@ void main_menu() {
                                             : &main_menu_logged_out;
 
     print_list(list);
-    fgets(input, sizeof(input), stdin);
+    const char *input = get_input();
 
     const int option = get_suitable_option_from_menu_list(list, input);
 
     if (option == -1) {
         main_menu();
     } else {
-        printf("Selected option %d\n", option + 1);
+        printf("Selected option %d (%s)\n", option + 1, list->entries[option]);
         if (!loggedIn) {
+            // If not logged in
             if (account_count == 0) {
                 switch (option) {
-                    case 0: create_page();
+                    case 0:
+                        create_page();
                         break;
+                    case 1:
+                        exit(1);
                     default: {
                         handle_error_message(ERR_INVALID_OPTION);
                         main_menu();
@@ -1090,12 +1242,14 @@ void main_menu() {
                     case 0: create_page();
                         break;
                     case 1: login_page();
+                    case 2: exit(1);
                     default: {
                         handle_error_message(ERR_INVALID_OPTION);
                         main_menu();
                     }
                 }
         } else {
+            // Logged in
             switch (option) {
                 case 0:
                     deposit_page();
@@ -1119,38 +1273,35 @@ void main_menu() {
 }
 
 void logout_page() {
-    char buffer[64];
     printf("Are you sure you would like to Logout? (y/n)\n");
-    fgets(buffer, sizeof(buffer), stdin);
+    char *input = get_input();
 
-    if (strcasecmp(buffer, "yes\n") == 0 || strcasecmp(buffer, "y\n") == 0 ||
-        strcmp(buffer, "yes") == 0 || strcmp(buffer, "y") == 0) {
+    if (strcasecmp(input, "yes\n") == 0 || strcasecmp(input, "y\n") == 0 ||
+        strcmp(input, "yes") == 0 || strcmp(input, "y") == 0) {
         current_account = NULL;
         printf("Logged out successfully!\n");
+        if (input) free(input);
         main_menu();
         return;
     }
-    if (strcasecmp(buffer, "no\n") == 0 || strcasecmp(buffer, "n\n") == 0 ||
-        strcmp(buffer, "no") == 0 || strcmp(buffer, "n") == 0) {
+    if (strcasecmp(input, "no\n") == 0 || strcasecmp(input, "n\n") == 0 ||
+        strcmp(input, "no") == 0 || strcmp(input, "n") == 0) {
+        if (input) free(input);
         main_menu();
         return;
     }
     printf("Please enter a valid option\n");
+    if (input) free(input);
     logout_page();
 }
 
 int main() {
     enable_utf8();
-    print_logo();
+    print_divider_thick();
+    printf("Welcome to the UoSM Banking System!\n");
     print_date_and_time();
-
-    const DatabaseResult res = load_or_create_database(true);
-    if (res.accounts && res.count > 0) {
-        for (size_t i = 0; i < res.count; i++) {
-            print_account_simple(&res.accounts[i]);
-            print_divider();
-        }
-    }
+    print_divider_thick();
+    print_loaded_accounts();
     printf("What would you like to do today?\n");
     main_menu();
 }
