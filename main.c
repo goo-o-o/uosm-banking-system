@@ -6,6 +6,7 @@
 #include <time.h>
 #include <dirent.h>
 #include <locale.h>
+#include <math.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -71,7 +72,7 @@ void handle_error_message(const ErrorCode code) {
             break;
         case ERR_INVALID_ID_FORMAT: printf("ID may only contain numbers!\n");
             break;
-        case ERR_INVALID_ID_LENGTH: printf("ID must be 7-9 digits long!\n");
+        case ERR_INVALID_ID_LENGTH: printf("ID must be 10 digits long!\n");
             break;
         case ERR_DELETE_FILE_FAILED: printf("Failed to delete file!\n");
             break;
@@ -530,17 +531,19 @@ static ErrorCode deposit(struct BankAccount *acc, const char *amount_str) {
  * @p SUCCESS If none of the above
  */
 static ErrorCode float_withdrawal(struct BankAccount *acc, const float amount) {
-    if (amount > acc->balance) {
+    float truncated_amount = roundf(amount * 100.0f) / 100.0f;
+
+    if (truncated_amount > acc->balance) {
         return ERR_INSUFFICIENT;
     }
-    if (amount <= 0) {
+    if (truncated_amount <= 0) {
         // Coursework didn't specify the range for this, will just do more than equals to 0 opposed to just more than 0
         // To prevent softlock when the user's balance is 0, and they accidentally click withdraw
         return ERR_INVALID_AMOUNT;
     }
-    acc->balance -= amount;
+    acc->balance -= truncated_amount;
 
-    log_transaction(WITHDRAWAL, amount, acc, NULL);
+    log_transaction(WITHDRAWAL, truncated_amount, acc, NULL);
 
     if (!save_or_update_account(acc)) return ERR_SAVE_FAILED;
     return SUCCESS;
@@ -619,10 +622,17 @@ static ErrorCode float_remittance(struct BankAccount *sender, struct BankAccount
 
     const float max_transferable = get_max_transferable(sender, recipient);
 
-    if (max_transferable > sender->balance) return ERR_INSUFFICIENT;
+    // Shift 2 decimal places to the left then round it, then we have to divide back
+    float truncated_amount = roundf(amount * 100.0f) / 100.0f;
+    float truncated_max_transferable = roundf(max_transferable * 100.0f) / 100.0f;
+
+    // printf("Transfer amount: %.8f (rounded to 2 decimals: %.2f)\n", amount, truncated_amount);
+    // printf("Max transferable: %.8f (rounded to 2 decimals: %.2f)\n", max_transferable, truncated_max_transferable);
+
+    if (truncated_amount > truncated_max_transferable) return ERR_INSUFFICIENT;
     // Tax goes to bank
-    sender->balance -= amount + get_tax(sender, recipient, amount);
-    recipient->balance += amount;
+    sender->balance -= truncated_amount + get_tax(sender, recipient, truncated_amount);
+    recipient->balance += truncated_amount;
 
     log_transaction(REMITTANCE, amount, sender, recipient);
 
@@ -1232,6 +1242,10 @@ void create_page() {
     while (1) {
         printf("Enter your Name:\n");
         name = get_input();
+        if (name == NULL) {
+            free(name);
+            continue;
+        }
         const ErrorCode code = is_valid_name(name);
         if (code == SUCCESS)
             break;
@@ -1242,7 +1256,11 @@ void create_page() {
     int option;
     while (1) {
         printf("Enter your account type (Savings/Current):\n");
-        const char *account_type_string = get_input();
+        char *account_type_string = get_input();
+        if (account_type_string == NULL) {
+            free(account_type_string);
+            continue;
+        }
         option = get_suitable_option_from_list(account_types, NUM_ACCOUNT_TYPES, account_type_string);
 
         if (option == -1) {
@@ -1255,6 +1273,7 @@ void create_page() {
     while (1) {
         printf("Enter your 10-digit ID:\n");
         id = get_input();
+        if (id == NULL) continue;;
         const ErrorCode code = is_valid_id(id);
         if (code == SUCCESS)
             break;
@@ -1268,6 +1287,10 @@ void create_page() {
     while (1) {
         printf("Enter your 4-digit PIN:\n");
         pin = get_input();
+        if (pin == NULL) {
+            free(pin);
+            continue;
+        }
         const ErrorCode code = is_valid_pin(pin);
         if (code == SUCCESS)
             break;
@@ -1283,10 +1306,6 @@ void create_page() {
     acc->date_created = current_time;
 
     printf("Successfully created a New Account!\n");
-
-    print_divider_thin();
-    print_login_details();
-    print_divider_thin();
 
     // I think I'll make it automatically log in
     current_account = acc;
@@ -1408,6 +1427,8 @@ struct BankAccount *get_account_from_identifier(char *identifier) {
  * @p SUCCESS If successful, @p current_account is updated
  */
 ErrorCode actually_login(char *identifier, const char *pin) {
+    if (pin == NULL) return ERR_INVALID_PIN_FORMAT;
+
     struct BankAccount *acc = get_account_from_identifier(identifier);
 
     if (acc == NULL) {
@@ -1431,9 +1452,9 @@ char *get_valid_identifier() {
         char *input = get_input();
         if (!input) continue;
 
-        int valid_name = is_valid_name(input) == SUCCESS;
-        int valid_number = is_valid_account_number(input) == SUCCESS;
-        int valid_id = is_valid_id(input) == SUCCESS;
+        const int valid_name = is_valid_name(input) == SUCCESS;
+        const int valid_number = is_valid_account_number(input) == SUCCESS;
+        const int valid_id = is_valid_id(input) == SUCCESS;
 
         if (valid_number) return input;
         if (valid_name && is_distinct_name(input)) return input;
@@ -1451,6 +1472,9 @@ char *get_valid_identifier() {
     }
 }
 
+/**
+ * Wrapper for login flow
+ */
 void login_page() {
     printf("Enter your Account Number, ID or Name: \n");
 
@@ -1462,6 +1486,8 @@ void login_page() {
     // But we do need to check for duplicate Numbers just in case, I will probably implement duplicate checking when creating accounts but just in case
     // User enters name -> multiple found -> prompts to enter Number or ID -> user enters Number -> duplicate Number -> prompts to enter either ID or Name ->
     // enters Name -> repeat -> enters ID -> pass
+
+    // Abstracted to get_valid_identifier();
 
     char *identifier = get_valid_identifier();
 
@@ -1478,7 +1504,9 @@ void login_page() {
     free(pin);
 }
 
-
+/**
+ * @brief Main main-menu wrapper that handles input when both logged-in and logged-out
+ */
 void main_menu() {
     print_divider_thin();
     print_login_details();
@@ -1550,6 +1578,10 @@ void main_menu() {
     }
 }
 
+/**
+ * @brief Wrapper for logout logic
+ * @remarks CLion says there are memory leaks, but I think they are false positives
+ */
 void logout_page() {
     printf("Are you sure you would like to Logout? (y/n)\n");
     char *input = get_input();
@@ -1560,12 +1592,14 @@ void logout_page() {
         printf("Logged out successfully!\n");
         if (input) free(input);
         main_menu();
+        // ReSharper disable once CppDFAMemoryLeak
         return;
     }
     if (strcasecmp(input, "no\n") == 0 || strcasecmp(input, "n\n") == 0 ||
         strcmp(input, "no") == 0 || strcmp(input, "n") == 0) {
         if (input) free(input);
         main_menu();
+        // ReSharper disable once CppDFAMemoryLeak
         return;
     }
     printf("Please enter a valid option\n");
